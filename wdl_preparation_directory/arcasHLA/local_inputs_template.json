@@ -1,0 +1,6 @@
+{
+  "MyBestWorkflow.base_file_name": "String",
+  "MyBestWorkflow.allocated_thread_number": "Int",
+  "MyBestWorkflow.input_bam_file": "File"
+}
+
