@@ -1,0 +1,180 @@
+---
+title: "A good title to conceive"
+author: "Author: Old Dull Donkey"
+date: "`r format(Sys.time(), '%F')`"
+output:
+    rmarkdown::html_document:
+        theme: readable
+        highlight: textmate
+        df_print: paged
+---
+
+```{r message=FALSE, warning=FALSE}
+rm(list = ls())
+ptm <- proc.time()
+options(stringsAsFactors = F)
+
+# proc.time() - ptm
+```
+
+# Load 
+
+```{r}
+source(here::here("utility_scripts", "packages.R"))
+```
+
+# Settings
+
+```{r}
+workflow_name <- "arcasHLA"
+raw_data_dirctory <- here::here("..", "raw_data_files")
+allocated_thread_number <- 24
+sub_folder_number <- 4
+```
+
+# Input and output of the Json files.
+
+```{r}
+input_json_boilerplate_path <- here::here("wdl_preparation_directory", workflow_name, "local_inputs_template.json")
+
+output_directory <- here::here(
+    "wdl_runtime_directory",
+    workflow_name,
+    "local_input_directory",
+    "json_file_directory"
+    ) %T>%
+    dir.create(., showWarnings = F, recursive = T)
+
+unlink(file.path(output_directory, "*"), recursive = T)
+
+output_by_folder_directory <- file.path(output_directory, "by_folder") %T>%
+    dir.create(., showWarnings = F, recursive = T)
+output_by_file_directory <- file.path(output_directory, "by_file") %T>%
+    dir.create(., showWarnings = F, recursive = T)
+
+wdl_result_output_directory <- here::here("wdl_result_directory", workflow_name)  %T>%
+    dir.create(., showWarnings = F, recursive = T)
+```
+
+# Get the sample name and file path.
+
+```{r}
+get_sample_information_from_a_directory <- function(a_directory) {
+    # a_directory <- here::here("..", "raw_data_files")
+    
+    raw_sample_file_paths <- list.files(a_directory, full.names = T)
+    
+    raw_sample_names <- raw_sample_file_paths %>%
+        basename %>%
+        stringr::str_split(., pattern = "\\.", simplify = T) %>%
+        .[, 1, drop = T]
+    
+    raw_sample_information_dataframe <- data.frame(
+        sample_name = raw_sample_names,
+        sample_path = raw_sample_file_paths
+    )
+
+    raw_sample_information_dataframe
+}
+
+all_inclusive_dataframe <- raw_data_dirctory %>%
+    get_sample_information_from_a_directory
+
+all_inclusive_dataframe
+```
+
+# View the lists for wdl inputs json files from the template
+
+```{r}
+raw_boilerplate_list <- fromJSON(input_json_boilerplate_path)
+raw_boilerplate_list
+```
+
+# Make workflow needed json file list.
+
+```{r}
+accumulation_list <- list()
+
+for (i in seq_len(nrow(all_inclusive_dataframe))) {
+    
+    current_sample_name <- all_inclusive_dataframe[i, "sample_name"]
+    
+    new_boilerplate_list <- raw_boilerplate_list
+    
+    new_boilerplate_list$MyBestWorkflow.base_file_name <- all_inclusive_dataframe[i, "sample_name"]
+    new_boilerplate_list$MyBestWorkflow.allocated_thread_number <- allocated_thread_number
+    new_boilerplate_list$MyBestWorkflow.input_bam_file <- all_inclusive_dataframe[i, "sample_path"]
+
+    accumulation_list[[current_sample_name]] <- new_boilerplate_list
+}
+accumulation_list %>% str
+```
+
+# how many sub-directory do you want to split the samples into.
+
+```{r}
+# sub_folder_number <- 10
+sample_number_per_sub_folder <- ceiling(length(accumulation_list) / sub_folder_number)
+
+split_folder_names <- paste("input_folder_",
+                          formatC(seq_len(sub_folder_number), width = 2, flag = "0"),
+                          sep = "")
+
+split_reference_vector <- rep(1:sub_folder_number, each = sample_number_per_sub_folder) %>%
+    head(., n = length(accumulation_list))
+
+
+split_list <- split(accumulation_list, list(split_reference_vector))
+names(split_list) <- head(split_folder_names, n = length(split_list))
+
+for (present_folder_name in names(split_list)) {
+    # print(present_folder_name)
+    present_json_parental_path <- file.path(output_by_folder_directory, present_folder_name) %T>%
+        dir.create(., showWarnings = F, recursive = T)
+    for (present_sample_name in names(split_list[[present_folder_name]])) {
+        # print(present_sample_name)
+        present_json_object <- split_list[[present_folder_name]][[present_sample_name]] %>%
+            toJSON(., auto_unbox = T, pretty = 4)
+        present_output_file <- paste(present_sample_name, "inputs", "json", sep = ".")
+        cat(present_json_object, file = file.path(present_json_parental_path, present_output_file))
+    }
+}
+```
+
+
+# Write the json files to one folder.
+
+```{r}
+for (i in seq_along(accumulation_list)) {
+    present_json_object <- toJSON(accumulation_list[[i]], auto_unbox = T, pretty = 4)
+    present_sample_name <- names(accumulation_list)[i]
+    present_output_file <- paste(present_sample_name, "inputs", "json", sep = ".")
+    cat(present_json_object, file = file.path(output_by_file_directory, present_output_file))
+}
+```
+
+
+# Make wdl runtime local option json file
+
+```{r}
+wdl_local_option_list <- list(
+    final_workflow_outputs_dir = wdl_result_output_directory,
+    use_relative_output_paths = "true",
+    write_to_cache = "false",
+    read_from_cache = "false"
+)
+
+present_json_object <- toJSON(wdl_local_option_list, auto_unbox = T, pretty = 4)
+
+cat(present_json_object,
+    file = here::here("wdl_runtime_directory", workflow_name, "wdl_local_options.json")
+)
+
+```
+
+
+
+```{r}
+proc.time() - ptm
+```
+
